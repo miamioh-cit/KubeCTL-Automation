@@ -1,6 +1,7 @@
 import os
 import requests
 import jenkins
+import base64
 
 # Required environment variables
 RANCHER_URL = os.environ.get('RANCHER_URL')
@@ -24,21 +25,24 @@ def get_kubeconfig(cluster_id):
     response.raise_for_status()
     return response.json()["config"]
 
-def create_jenkins_credential(server, cluster_id, kubeconfig):
+def create_file_credential(server, cluster_id, kubeconfig):
     credential_id = f"kubeconfig-{cluster_id}"
-    xml = f"""<com.cloudbees.plugins.credentials.impl.StringCredentialsImpl>
+    encoded_content = base64.b64encode(kubeconfig.encode()).decode()
+
+    xml = f"""<com.cloudbees.plugins.credentials.impl.FileCredentialsImpl>
   <scope>GLOBAL</scope>
   <id>{credential_id}</id>
   <description>Kubeconfig for Rancher cluster {cluster_id}</description>
-  <secret>{kubeconfig}</secret>
-</com.cloudbees.plugins.credentials.impl.StringCredentialsImpl>"""
+  <fileName>config</fileName>
+  <secretBytes>{encoded_content}</secretBytes>
+</com.cloudbees.plugins.credentials.impl.FileCredentialsImpl>"""
 
     try:
         server.get_credentials_xml('system', '::', credential_id)
-        print(f"[SKIP] Credential '{credential_id}' already exists.")
+        print(f"[SKIP] File credential '{credential_id}' already exists.")
     except:
         server.create_credentials('system', '::', xml)
-        print(f"[ADD] Credential '{credential_id}' created.")
+        print(f"[ADD] File credential '{credential_id}' created.")
 
 def main():
     print(f"[INFO] Connecting to Jenkins at {JENKINS_URL} as {JENKINS_USER}")
@@ -53,7 +57,7 @@ def main():
         print(f"[INFO] Processing cluster: {name} ({cluster_id})")
         try:
             kubeconfig = get_kubeconfig(cluster_id)
-            create_jenkins_credential(server, cluster_id, kubeconfig)
+            create_file_credential(server, cluster_id, kubeconfig)
         except Exception as e:
             print(f"[ERROR] Failed for cluster {cluster_id}: {e}")
 
