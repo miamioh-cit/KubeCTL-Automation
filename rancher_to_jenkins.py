@@ -4,30 +4,33 @@ import jenkins
 import base64
 import urllib3
 from urllib.parse import quote
+from requests.auth import HTTPBasicAuth
 
-# Suppress HTTPS certificate warnings (for self-signed Rancher)
+# Suppress HTTPS warnings (Rancher with self-signed certs)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Environment config (injected by Jenkins)
+# Environment config
 RANCHER_URL = os.environ.get('RANCHER_URL')
-RANCHER_TOKEN = os.environ.get('RANCHER_TOKEN')
+RANCHER_ACCESS_KEY = os.environ.get('RANCHER_ACCESS_KEY')
+RANCHER_SECRET_KEY = os.environ.get('RANCHER_SECRET_KEY')
 JENKINS_URL = os.environ.get('JENKINS_URL')
 JENKINS_USER = os.environ.get('JENKINS_USER')
 JENKINS_TOKEN = os.environ.get('JENKINS_TOKEN')
 
+# Use HTTP Basic Auth for Rancher
+auth = HTTPBasicAuth(RANCHER_ACCESS_KEY, RANCHER_SECRET_KEY)
+
 def get_clusters():
     print(f"[INFO] Connecting to Rancher at {RANCHER_URL}")
-    headers = {"Authorization": f"Bearer {RANCHER_TOKEN}"}
     url = f"{RANCHER_URL}/v3/clusters"
-    response = requests.get(url, headers=headers, verify=False)
+    response = requests.get(url, auth=auth, verify=False)
     response.raise_for_status()
     return response.json()["data"]
 
 def get_kubeconfig(cluster_id):
-    headers = {"Authorization": f"Bearer {RANCHER_TOKEN}"}
-    encoded_id = quote(cluster_id, safe='')  # URL-safe encoding
+    encoded_id = quote(cluster_id, safe='')
     url = f"{RANCHER_URL}/v3/clusters/{encoded_id}?action=generateKubeconfig"
-    response = requests.post(url, headers=headers, verify=False)
+    response = requests.post(url, auth=auth, verify=False)
     response.raise_for_status()
     return response.json()["config"]
 
@@ -70,7 +73,7 @@ def main():
             kubeconfig = get_kubeconfig(cluster_id)
             create_file_credential(server, cluster_name, kubeconfig)
         except requests.exceptions.HTTPError as e:
-            print(f"[ERROR] Rancher refused kubeconfig for {cluster_name}: {e}")
+            print(f"[ERROR] Rancher error for {cluster_name}: {e}")
         except Exception as e:
             print(f"[ERROR] General failure for {cluster_name}: {e}")
 
