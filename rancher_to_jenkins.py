@@ -2,8 +2,12 @@ import os
 import requests
 import jenkins
 import base64
+import urllib3
 
-# Required environment variables
+# Suppress InsecureRequestWarning if using HTTP or self-signed certs
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Environment variables passed from Jenkins
 RANCHER_URL = os.environ.get('RANCHER_URL')
 RANCHER_TOKEN = os.environ.get('RANCHER_TOKEN')
 JENKINS_URL = os.environ.get('JENKINS_URL')
@@ -25,14 +29,14 @@ def get_kubeconfig(cluster_id):
     response.raise_for_status()
     return response.json()["config"]
 
-def create_file_credential(server, cluster_id, kubeconfig):
-    credential_id = f"kubeconfig-{cluster_id}"
+def create_file_credential(server, cluster_name, kubeconfig):
+    credential_id = f"kubeconfig-{cluster_name}"
     encoded_content = base64.b64encode(kubeconfig.encode()).decode()
 
     xml = f"""<com.cloudbees.plugins.credentials.impl.FileCredentialsImpl>
   <scope>GLOBAL</scope>
   <id>{credential_id}</id>
-  <description>Kubeconfig for Rancher cluster {cluster_id}</description>
+  <description>Kubeconfig for Rancher cluster {cluster_name}</description>
   <fileName>config</fileName>
   <secretBytes>{encoded_content}</secretBytes>
 </com.cloudbees.plugins.credentials.impl.FileCredentialsImpl>"""
@@ -48,18 +52,23 @@ def main():
     print(f"[INFO] Connecting to Jenkins at {JENKINS_URL} as {JENKINS_USER}")
     server = jenkins.Jenkins(JENKINS_URL, username=JENKINS_USER, password=JENKINS_TOKEN)
 
-    clusters = get_clusters()
+    try:
+        clusters = get_clusters()
+    except Exception as e:
+        print(f"[ERROR] Failed to retrieve clusters: {e}")
+        return
+
     print(f"[INFO] Found {len(clusters)} cluster(s).")
 
     for cluster in clusters:
         cluster_id = cluster["id"]
-        name = cluster.get("name", cluster_id)
-        print(f"[INFO] Processing cluster: {name} ({cluster_id})")
+        cluster_name = cluster.get("name", cluster_id)
+        print(f"[INFO] Processing cluster: {cluster_name} ({cluster_id})")
         try:
             kubeconfig = get_kubeconfig(cluster_id)
-            create_file_credential(server, cluster_id, kubeconfig)
+            create_file_credential(server, cluster_name, kubeconfig)
         except Exception as e:
-            print(f"[ERROR] Failed for cluster {cluster_id}: {e}")
+            print(f"[ERROR] Failed for cluster '{cluster_name}': {e}")
 
 if __name__ == "__main__":
     main()
