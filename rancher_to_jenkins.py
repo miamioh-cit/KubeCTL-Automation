@@ -3,11 +3,12 @@ import requests
 import jenkins
 import base64
 import urllib3
+from urllib.parse import quote
 
-# Suppress InsecureRequestWarning if using HTTP or self-signed certs
+# Suppress HTTPS certificate warnings (for self-signed Rancher)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Environment variables passed from Jenkins
+# Environment config (injected by Jenkins)
 RANCHER_URL = os.environ.get('RANCHER_URL')
 RANCHER_TOKEN = os.environ.get('RANCHER_TOKEN')
 JENKINS_URL = os.environ.get('JENKINS_URL')
@@ -24,7 +25,8 @@ def get_clusters():
 
 def get_kubeconfig(cluster_id):
     headers = {"Authorization": f"Bearer {RANCHER_TOKEN}"}
-    url = f"{RANCHER_URL}/v3/clusters/{cluster_id}?action=generateKubeconfig"
+    encoded_id = quote(cluster_id, safe='')  # URL-safe encoding
+    url = f"{RANCHER_URL}/v3/clusters/{encoded_id}?action=generateKubeconfig"
     response = requests.post(url, headers=headers, verify=False)
     response.raise_for_status()
     return response.json()["config"]
@@ -43,10 +45,10 @@ def create_file_credential(server, cluster_name, kubeconfig):
 
     try:
         server.get_credentials_xml('system', '::', credential_id)
-        print(f"[SKIP] File credential '{credential_id}' already exists.")
+        print(f"[SKIP] Credential '{credential_id}' already exists.")
     except:
         server.create_credentials('system', '::', xml)
-        print(f"[ADD] File credential '{credential_id}' created.")
+        print(f"[ADD] Credential '{credential_id}' created.")
 
 def main():
     print(f"[INFO] Connecting to Jenkins at {JENKINS_URL} as {JENKINS_USER}")
@@ -67,8 +69,10 @@ def main():
         try:
             kubeconfig = get_kubeconfig(cluster_id)
             create_file_credential(server, cluster_name, kubeconfig)
+        except requests.exceptions.HTTPError as e:
+            print(f"[ERROR] Rancher refused kubeconfig for {cluster_name}: {e}")
         except Exception as e:
-            print(f"[ERROR] Failed for cluster '{cluster_name}': {e}")
+            print(f"[ERROR] General failure for {cluster_name}: {e}")
 
 if __name__ == "__main__":
     main()
